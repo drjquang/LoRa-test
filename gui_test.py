@@ -1,100 +1,142 @@
+# main.py
+
 import tkinter as tk
 import random
+from queue import Queue
+from parameters import *
+from serial_manager import SerialManager
 
-class App:
+class RouletteApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Tkinter Random Grid")
-        self.root.configure(bg="lime")
-        self.root.attributes("-fullscreen", True)
+        self.root.title(APP_TITLE)
+        self.root.configure(bg=WINDOW_BG)
+        self.root.state("zoomed")
 
-        # Layout: 10% / 80% / 10%
-        root.grid_rowconfigure(0, weight=1)
-        root.grid_rowconfigure(1, weight=8)
-        root.grid_rowconfigure(2, weight=1)
-        root.grid_columnconfigure(0, weight=1)
+        self.queue = Queue()
+        self.serial_manager = SerialManager(self.queue)
+        self.serial_manager.start()
 
-        # ---------- Top ----------
-        top = tk.Frame(root, bg="lime")
-        top.grid(row=0, column=0, sticky="nsew")
-
-        tk.Label(
-            top,
-            text="Random Number Grid",
-            bg="lime",
-            fg="black",
-            font=("Arial", 32, "bold")
-        ).pack(expand=True)
-
-        # ---------- Middle ----------
-        self.middle = tk.Frame(root, bg="lime")
-        self.middle.grid(row=1, column=0, sticky="nsew")
-
-        # ---------- Bottom ----------
-        bottom = tk.Frame(root, bg="lime")
-        bottom.grid(row=2, column=0, sticky="nsew")
-
-        tk.Button(
-            bottom,
-            text="Generate",
-            font=("Arial", 16),
-            command=self.add_number
-        ).pack(side="right", padx=20, pady=20)
-
-        # Storage
         self.labels = []
+        self.numbers = []
 
-        # Grid configuration
-        self.max_columns = 10
-        self.square_size_px = 80
+        self.source = "RANDOM"
 
-        # Exit fullscreen
-        root.bind("<Escape>", lambda e: root.attributes("-fullscreen", False))
+        self.build_ui()
+        self.root.after(50, self.check_serial)
 
-    def clear_middle(self):
-        for lbl in self.labels:
-            lbl.destroy()
-        self.labels.clear()
+    # ---------------- UI ----------------
 
-    def add_number(self):
-        self.middle.update_idletasks()
+    def build_ui(self):
+        self.root.rowconfigure(0, weight=HEADER_RATIO)
+        self.root.rowconfigure(1, weight=BODY_RATIO)
+        self.root.rowconfigure(2, weight=FOOTER_RATIO)
+        self.root.columnconfigure(0, weight=1)
 
-        # Calculate how many rows fit in middle frame
-        middle_height = self.middle.winfo_height()
-        max_rows = max(1, middle_height // (self.square_size_px + 10))
+        # Header
+        self.header = tk.Frame(self.root, bg=WINDOW_BG, highlightthickness=2, highlightbackground="white")
+        self.header.grid(row=0, column=0, sticky="nsew")
 
-        max_items = max_rows * self.max_columns
-
-        # Clear if full
-        if len(self.labels) >= max_items:
-            self.clear_middle()
-
-        number = random.randint(0, 36)
-        bg_color = random.choice(["red", "black", "green"])
-
-        lbl = tk.Label(
-            self.middle,
-            text=str(number),
-            width=6,
-            height=3,
-            bg=bg_color,
+        self.title_label = tk.Label(
+            self.header,
+            text=APP_TITLE,
             fg="white",
-            font=("Arial", 20, "bold"),
-            relief="solid",
-            borderwidth=2
+            bg=WINDOW_BG,
+            font=("Arial", 32, "bold")
+        )
+        self.title_label.pack(expand=True)
+
+        # Body
+        self.body = tk.Frame(self.root, bg=WINDOW_BG, highlightthickness=2, highlightbackground="white")
+        self.body.grid(row=1, column=0, sticky="nsew")
+
+        for r in range(ROWS):
+            self.body.rowconfigure(r, weight=1)
+            for c in range(COLS):
+                self.body.columnconfigure(c, weight=1)
+
+                lbl = tk.Label(
+                    self.body,
+                    text="",
+                    fg=COLOR_TEXT,
+                    bg=WINDOW_BG,
+                    font=("Arial", LABEL_FONT_SIZE, "bold"),
+                    width=4,
+                    height=2,
+                    relief="solid",
+                    borderwidth=1
+                )
+                lbl.grid(row=r, column=c, padx=2, pady=2, sticky="nsew")
+                self.labels.append(lbl)
+
+        # Footer
+        self.footer = tk.Frame(self.root, bg=WINDOW_BG, highlightthickness=2, highlightbackground="white")
+        self.footer.grid(row=2, column=0, sticky="nsew")
+
+        self.footer.columnconfigure(0, weight=1)
+        self.footer.columnconfigure(1, weight=1)
+
+        self.status_label = tk.Label(
+            self.footer,
+            text="Serial: Disconnected | Source: RANDOM",
+            fg="white",
+            bg=WINDOW_BG,
+            font=("Arial", 16)
+        )
+        self.status_label.grid(row=0, column=0, sticky="w", padx=20)
+
+        self.btn_generate = tk.Button(
+            self.footer,
+            text="Generate",
+            font=("Arial", 16, "bold"),
+            command=self.generate_random
+        )
+        self.btn_generate.grid(row=0, column=1, sticky="e", padx=20)
+
+    # ---------------- Logic ----------------
+
+    def get_color(self, num):
+        if num == 0 or num == 37:
+            return COLOR_GREEN
+        elif num in RED_NUMBERS:
+            return COLOR_RED
+        else:
+            return COLOR_BLACK
+
+    def push_number(self, num, source):
+        self.source = source
+        self.numbers.insert(0, num)
+        self.numbers = self.numbers[:ROWS * COLS]
+
+        for i, lbl in enumerate(self.labels):
+            if i < len(self.numbers):
+                n = self.numbers[i]
+                lbl.config(text=str(n), bg=self.get_color(n))
+            else:
+                lbl.config(text="", bg=WINDOW_BG)
+
+        self.update_status()
+
+    def generate_random(self):
+        num = random.randint(0, 37)
+        self.push_number(num, "RANDOM")
+
+    def check_serial(self):
+        while not self.queue.empty():
+            source, num = self.queue.get()
+            self.push_number(num, source)
+
+        self.update_status()
+        self.root.after(50, self.check_serial)
+
+    def update_status(self):
+        self.status_label.config(
+            text=f"Serial: {self.serial_manager.status} | Source: {self.source}"
         )
 
-        # Newest first
-        self.labels.insert(0, lbl)
-
-        # Re-layout
-        for index, label in enumerate(self.labels):
-            row = index // self.max_columns
-            col = index % self.max_columns
-            label.grid(row=row, column=col, padx=5, pady=5, sticky="nw")
-
+# ---------------- Main ----------------
 
 if __name__ == "__main__":
     root = tk.Tk()
-    App(root)
+    app = RouletteApp(root)
     root.mainloop()
